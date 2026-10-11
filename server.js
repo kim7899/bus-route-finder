@@ -1,4 +1,5 @@
 import http from 'node:http';
+import db from './db.js';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
@@ -29,10 +30,123 @@ async function upstream(url, options = {}) {
   if (!data) { const error = new Error('TMAP 응답을 읽을 수 없습니다.'); error.status = 502; throw error; }
   return data;
 }
+async function readJsonBody(req) {
+  let text = '';
+
+  for await (const chunk of req) {
+    text += chunk.toString();
+
+    if (text.length > 200000) {
+      const error = new Error('예약 데이터가 너무 큽니다.');
+      error.status = 413;
+      throw error;
+    }
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    const error = new Error('올바른 JSON 데이터가 아닙니다.');
+    error.status = 400;
+    throw error;
+  }
+}
+async function createReservation(req, res) {
+  try {
+    const body = await readJsonBody(req);
+
+    const {
+      startName, startLat, startLng,
+      endName, endLat, endLng,
+      departureTime, route
+    } = body;
+
+    if (
+      typeof startName !== 'string' ||
+      typeof endName !== 'string' ||
+      !startName.trim() || !endName.trim() ||
+      startName.length > 255 || endName.length > 255 ||
+      !validLat(startLat) || !validLng(startLng) ||
+      !validLat(endLat) || !validLng(endLng) ||
+      !route || !Array.isArray(route.segments) ||
+      !route.segments.some(s => s.type === 'BUS')
+    ) {
+      return fail(res, 400, 'INVALID_RESERVATION', '예약 정보가 올바르지 않습니다.');
+    }
+
+    if (
+      typeof departureTime !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(departureTime) ||
+      !validSearchDttm(departureTime.replace(/\D/g, ''))
+    ) {
+      return fail(res, 400, 'INVALID_TIME', '출발 시각이 올바르지 않습니다.');
+    }
+
+    const busSegments = route.segments.filter(s => s.type === 'BUS');
+    const boardingStop = busSegments[0]?.from || null;
+    const dropoffStop = busSegments.at(-1)?.to || null;
+
+    const routeJson = JSON.stringify(route);
+
+    if (routeJson.length > 100000) {
+      return fail(res, 413, 'ROUTE_TOO_LARGE', '경로 정보가 너무 큽니다.');
+    }
+
+    // 로그인 기능 구현 전까지 개발용 테스트 사용자
+    const userId = 1;
+
+    const [result] = await db.execute(
+      `INSERT INTO reservations
+       (user_id, start_name, start_lat, start_lng,
+        end_name, end_lat, end_lng,
+        boarding_stop, dropoff_stop,
+        departure_time, route_data, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'RESERVED')`,
+      [
+        userId,
+        startName,
+        Number(startLat),
+        Number(startLng),
+        endName,
+        Number(endLat),
+        Number(endLng),
+        boardingStop,
+        dropoffStop,
+        departureTime.replace('T', ' ') + ':00',
+        routeJson
+      ]
+    );
+
+    return json(res, 201, {
+      success: true,
+      reservationId: result.insertId
+    });
+
+  } catch (error) {
+    console.error('예약 저장 실패:', error);
+    return fail(
+      res,
+      error.status || 500,
+      'RESERVATION_ERROR',
+      error.status ? error.message : '예약 저장 중 서버 오류가 발생했습니다.'
+    );
+  }
+}
 export async function handler(req,res) {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname.startsWith('/api/')) {
-    if (req.method !== 'GET') return fail(res,405,'METHOD_NOT_ALLOWED','GET 요청만 지원합니다.');
+
+  if (url.pathname === '/api/reservations') {
+    if (req.method !== 'POST') {
+      return fail(res, 405, 'METHOD_NOT_ALLOWED', 'POST 요청만 지원합니다.');
+    }
+
+    return createReservation(req, res);
+  }
+
+  if (req.method !== 'GET') {
+    return fail(res, 405, 'METHOD_NOT_ALLOWED', 'GET 요청만 지원합니다.');
+  }
     if (!key) return fail(res,503,'KEY_MISSING','서버에 TMAP_API_KEY를 설정해 주세요.');
     try {
       if (url.pathname === '/api/routes') {

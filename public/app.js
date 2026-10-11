@@ -111,6 +111,45 @@ function renderRoutes() {
     addText(summary,'h3',`약 ${minutes(route.totalTime)}`);
     addText(summary,'p',route.segments.filter(s=>s.type==='BUS').map(s=>`${s.busNumber || '버스'}번`).join(' → ') || '버스 경로');
     const show=addText(head,'button',index===0?'지도에 표시':'이 경로 지도 보기'); show.type='button'; show.addEventListener('click',()=>drawMap(route));
+    const reserve = addText(head, 'button', '이 경로 예약하기');
+reserve.type = 'button';
+
+reserve.addEventListener('click', async () => {
+  if (!confirm('선택한 버스 경로를 예약할까요?')) return;
+
+  reserve.disabled = true;
+
+  try {
+    const response = await fetch('/api/reservations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        startName: '현재 위치',
+        startLat: origin.lat,
+        startLng: origin.lng,
+        endName: destination.name,
+        endLat: destination.lat,
+        endLng: destination.lng,
+        departureTime: departureInput.value,
+        route
+      })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error?.message || '예약 실패');
+    }
+
+    status(`예약 완료! 예약 번호: ${result.reservationId}`);
+  } catch (error) {
+    status(error.message, true);
+  } finally {
+    reserve.disabled = false;
+  }
+});
     const stats=addText(card,'div','','stats');
     [['환승',route.transferCount ? `${route.transferCount}회`:'없음'],['도보 시간',minutes(route.totalWalkTime)],['도보 거리',`${Math.round(route.totalWalkDistance)}m`],['예상 요금',won(route.totalFare)]].forEach(([label,value])=>{const item=addText(stats,'span',label);addText(item,'strong',value);});
     const timeline=addText(card,'ol','','timeline'); addText(timeline,'li','현재 위치');
