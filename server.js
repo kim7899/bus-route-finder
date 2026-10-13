@@ -143,6 +143,48 @@ export async function handler(req,res) {
     return authHandler(req, res, url.pathname);
   }
   if (url.pathname.startsWith('/api/')) {
+    const cancelMatch = url.pathname.match(
+  /^\/api\/reservations\/([1-9]\d*)\/cancel$/
+);
+
+if (cancelMatch) {
+  if (req.method !== 'PATCH') {
+    return fail(res, 405, 'METHOD_NOT_ALLOWED', 'PATCH 요청만 지원합니다.');
+  }
+
+  const user = await requireUser(req, res);
+  if (!user) return;
+
+  const reservationId = Number(cancelMatch[1]);
+
+  if (!Number.isSafeInteger(reservationId)) {
+    return fail(res, 400, 'INVALID_ID', '예약 번호가 올바르지 않습니다.');
+  }
+
+  const [result] = await db.execute(
+    `UPDATE reservations
+     SET status = 'CANCELLED'
+     WHERE id = ?
+       AND user_id = ?
+       AND status = 'RESERVED'`,
+    [reservationId, user.id]
+  );
+
+  if (result.affectedRows === 0) {
+    return fail(
+      res,
+      409,
+      'CANCEL_FAILED',
+      '취소 가능한 본인 예약을 찾을 수 없습니다.'
+    );
+  }
+
+  return json(res, 200, {
+    success: true,
+    reservationId,
+    status: 'CANCELLED'
+  });
+}
 
   if (url.pathname === '/api/reservations') {
      const user = await requireUser(req, res);
@@ -155,10 +197,10 @@ export async function handler(req,res) {
   if (req.method === 'GET') {
     const [rows] = await db.execute(
       `SELECT id, start_name, end_name,
-              departure_time, status, created_at
-       FROM reservations
-       WHERE user_id = ?
-       ORDER BY id DESC`,
+        departure_time, status, created_at, route_data
+ FROM reservations
+ WHERE user_id = ?
+ ORDER BY id DESC`,
       [user.id]
     );
 
