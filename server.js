@@ -4,6 +4,10 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {parseRoutes} from './routes.js';
+import {
+  authHandler,
+  requireUser
+} from './auth-server.js';
 const root = path.dirname(fileURLToPath(import.meta.url));
 try { const env = await readFile(path.join(root, '.env'), 'utf8'); for (const line of env.split(/\r?\n/)) { const match = line.match(/^([A-Z_]+)=(.*)$/); if (match && !process.env[match[1]]) process.env[match[1]] = match[2].trim().replace(/^['"]|['"]$/g, ''); } } catch (error) { if (error.code !== 'ENOENT') throw error; }
 const key = process.env.TMAP_API_KEY;
@@ -92,9 +96,10 @@ async function createReservation(req, res) {
       return fail(res, 413, 'ROUTE_TOO_LARGE', '경로 정보가 너무 큽니다.');
     }
 
-    // 로그인 기능 구현 전까지 개발용 테스트 사용자
-    const userId = 1;
+    const user = await requireUser(req, res);
+    if (!user) return;
 
+const userId = user.id;
     const [result] = await db.execute(
       `INSERT INTO reservations
        (user_id, start_name, start_lat, start_lng,
@@ -134,15 +139,39 @@ async function createReservation(req, res) {
 }
 export async function handler(req,res) {
   const url = new URL(req.url, 'http://localhost');
+  if (url.pathname.startsWith('/api/auth/')) {
+    return authHandler(req, res, url.pathname);
+  }
   if (url.pathname.startsWith('/api/')) {
 
   if (url.pathname === '/api/reservations') {
-    if (req.method !== 'POST') {
-      return fail(res, 405, 'METHOD_NOT_ALLOWED', 'POST 요청만 지원합니다.');
-    }
+     const user = await requireUser(req, res);
+  if (!user) return;
 
+  if (req.method === 'POST') {
     return createReservation(req, res);
   }
+
+  if (req.method === 'GET') {
+    const [rows] = await db.execute(
+      `SELECT id, start_name, end_name,
+              departure_time, status, created_at
+       FROM reservations
+       WHERE user_id = ?
+       ORDER BY id DESC`,
+      [user.id]
+    );
+
+    return json(res, 200, {
+      reservations: rows
+    });
+  }
+
+  return fail(
+    res, 405, 'METHOD_NOT_ALLOWED',
+    'GET 또는 POST만 지원합니다.'
+  );
+}
 
   if (req.method !== 'GET') {
     return fail(res, 405, 'METHOD_NOT_ALLOWED', 'GET 요청만 지원합니다.');
@@ -150,6 +179,8 @@ export async function handler(req,res) {
     if (!key) return fail(res,503,'KEY_MISSING','서버에 TMAP_API_KEY를 설정해 주세요.');
     try {
       if (url.pathname === '/api/routes') {
+        const user = await requireUser(req, res);
+        if (!user) return;
         const p = url.searchParams;
         if (!validLat(p.get('startLat')) || !validLng(p.get('startLng')) || !validLat(p.get('endLat')) || !validLng(p.get('endLng'))) return fail(res,400,'INVALID_COORDINATES','올바른 위도와 경도를 입력해 주세요.');
         const searchDttm = p.get('searchDttm');
@@ -165,7 +196,13 @@ export async function handler(req,res) {
       return fail(res,error.status || 502,'UPSTREAM_ERROR',error.message || '외부 API 연결에 실패했습니다.',error.upstreamStatus ? {upstreamStatus:error.upstreamStatus} : {});
     }
   }
-  const files = {'/':'index.html','/app.js':'app.js','/destination.js':'destination.js','/style.css':'style.css'};
+  const files = {
+  '/': 'index.html',
+  '/app.js': 'app.js',
+  '/auth-client.js': 'auth-client.js',
+  '/destination.js': 'destination.js',
+  '/style.css': 'style.css'
+};
   if (req.method !== 'GET' || !files[url.pathname]) return fail(res,404,'NOT_FOUND','페이지를 찾을 수 없습니다.');
   const name = files[url.pathname];
   const mime = name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html';
@@ -173,3 +210,4 @@ export async function handler(req,res) {
   res.writeHead(200,{'Content-Type':`${mime}; charset=utf-8`,'Cache-Control':'no-store'}); res.end(content);
 }
 if (process.env.NODE_ENV !== 'test') http.createServer((req,res) => { handler(req,res).catch(() => fail(res,500,'SERVER_ERROR','서버 오류가 발생했습니다.')); }).listen(Number(process.env.PORT) || 3000, () => console.log(`http://localhost:${Number(process.env.PORT) || 3000}`));
+

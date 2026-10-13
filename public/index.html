@@ -1,1 +1,175 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>버스 길찾기</title><link rel="stylesheet" href="/style.css"></head><body><header><div class="shell"><span class="brand">● 버스길</span><span class="header-note">지금 위치에서 목적지까지</span></div></header><main class="shell"><section class="hero"><span class="eyebrow">BUS ROUTE FINDER</span><h1>버스로 가는<br><em>가장 좋은 길</em></h1><p>현재 위치와 목적지를 선택하면 걷는 거리와 환승까지 고려해 버스 경로를 찾아드려요.</p></section><div class="layout"><section class="search card" aria-labelledby="search-title"><h2 id="search-title">어디로 가세요?</h2><div class="field"><span class="field-icon location">●</span><div class="field-content"><label>출발 · 현재 위치</label><strong id="location-label">위치 확인이 필요해요</strong><small id="accuracy"></small></div><button id="locate" class="text-button" type="button">위치 확인</button></div><div class="connector"></div><form id="search-form"><div class="field destination"><span class="field-icon destination-icon">◆</span><div class="field-content"><label for="query">도착 · 주소 또는 장소명</label><input id="query" type="search" placeholder="주소 또는 장소명을 입력하세요" autocomplete="off" required minlength="2"><button class="search-button" type="submit">검색</button></div></div></form><div id="places" class="places" hidden></div><div id="selected" class="selected" hidden></div><div class="field departure-time"><span class="field-icon">◷</span><div class="field-content"><label for="departure-time">출발 시각 · 시간표 조회 기준</label><input id="departure-time" type="datetime-local" aria-label="출발 시각"></div></div><button id="route-button" class="primary" type="button" disabled>버스 경로 찾기 <span>→</span></button><p id="status" class="status" role="status" aria-live="polite">현재 위치 확인부터 시작해 주세요.</p></section><section class="map-card card" aria-label="경로 지도"><div class="map-header"><div><span class="eyebrow">ROUTE PREVIEW</span><h2>이동 경로</h2></div><span class="map-legend"><i></i>버스 <i></i>도보</span></div><div class="map-area"><svg id="map" role="img" aria-label="경로 좌표 미리보기" viewBox="0 0 600 390" preserveAspectRatio="xMidYMid meet"><rect width="600" height="390" fill="#f1f5f1"/><g class="grid"><path d="M0 70H600M0 150H600M0 230H600M0 310H600M80 0V390M180 0V390M280 0V390M380 0V390M480 0V390M580 0V390"/></g><g id="map-paths"></g><g id="map-markers"></g></svg><div id="map-empty" class="map-empty">경로를 찾으면 이동 동선을 보여드려요</div></div><p class="map-caption">좌표를 이용한 경로 개요 · 실제 지도 배경은 제공되지 않습니다.</p></section></div><section id="results" class="results" hidden><div class="section-title"><div><span class="eyebrow">YOUR ROUTES</span><h2>추천 버스 경로</h2></div><span class="estimate-note">예상 경로 · 실시간 버스 도착 정보 아님</span></div><div id="route-list"></div></section></main><footer class="shell">버스길 · TMAP 예상 경로 기반 안내</footer><script type="module" src="/app.js"></script></body></html>
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>버스 길찾기</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- =========================================================================
+       1. 인증 화면 (로그인 / 회원가입)
+       ========================================================================= -->
+  <section id="auth-screen" class="auth-screen" hidden>
+    <div class="auth-card">
+      <h1>버스길</h1>
+      <p>로그인하고 버스 경로를 검색하세요.</p>
+
+      <!-- 로그인 폼 -->
+      <form id="login-form">
+        <h2>로그인</h2>
+        <input id="login-id" placeholder="아이디" autocomplete="username" required>
+        <input id="login-password" type="password" placeholder="비밀번호" autocomplete="current-password" required>
+        <button type="submit">로그인</button>
+        <button id="show-register" type="button">회원가입</button>
+      </form>
+
+      <!-- 회원가입 폼 -->
+      <form id="register-form" hidden>
+        <h2>회원가입</h2>
+        <input id="register-name" placeholder="이름" required>
+        <input id="register-id" placeholder="아이디 (영문·숫자 4자 이상)" minlength="4" required>
+        <input id="register-password" type="password" placeholder="비밀번호 (8자 이상)" minlength="8" required>
+
+        <label for="register-birth">생년월일</label>
+        <input id="register-birth" type="date" required>
+
+        <input id="register-email" type="email" placeholder="이메일 (선택)">
+        <input id="register-phone" type="tel" placeholder="전화번호 (선택)">
+
+        <button type="submit">회원가입 완료</button>
+        <button id="show-login" type="button">로그인으로 돌아가기</button>
+      </form>
+
+      <p id="auth-message" role="alert"></p>
+    </div>
+  </section>
+
+  <!-- =========================================================================
+       2. 메인 애플리케이션 화면
+       ========================================================================= -->
+  <div id="app-screen" hidden>
+    <header>
+      <div class="shell">
+        <span class="brand">● 버스길</span>
+        <span class="header-note">지금 위치에서 목적지까지</span>
+      </div>
+      <div class="header-note">
+        <span id="user-greeting"></span>
+        <button id="my-reservations-button" type="button">내 예약</button>
+        <button id="logout-button" type="button">로그아웃</button>
+      </div>
+    </header>
+
+    <main class="shell">
+      <!-- 히어로 배너 -->
+      <section class="hero">
+        <span class="eyebrow">BUS ROUTE FINDER</span>
+        <h1>버스로 가는<br><em>가장 좋은 길</em></h1>
+        <p>현재 위치와 목적지를 선택하면 걷는 거리와 환승까지 고려해 버스 경로를 찾아드려요.</p>
+      </section>
+
+      <div class="layout">
+        <!-- 검색 섹션 -->
+        <section class="search card" aria-labelledby="search-title">
+          <h2 id="search-title">어디로 가세요?</h2>
+
+          <!-- 출발지 / 현재 위치 -->
+          <div class="field">
+            <span class="field-icon location">●</span>
+            <div class="field-content">
+              <label>출발 · 현재 위치</label>
+              <strong id="location-label">위치 확인이 필요해요</strong>
+              <small id="accuracy"></small>
+            </div>
+            <button id="locate" class="text-button" type="button">위치 확인</button>
+          </div>
+
+          <div class="connector"></div>
+
+          <!-- 도착지 검색 -->
+          <form id="search-form">
+            <div class="field destination">
+              <span class="field-icon destination-icon">◆</span>
+              <div class="field-content">
+                <label for="query">도착 · 주소 또는 장소명</label>
+                <input id="query" type="search" placeholder="주소 또는 장소명을 입력하세요" autocomplete="off" required minlength="2">
+                <button class="search-button" type="submit">검색</button>
+              </div>
+            </div>
+          </form>
+
+          <div id="places" class="places" hidden></div>
+          <div id="selected" class="selected" hidden></div>
+
+          <!-- 출발 시각 설정 -->
+          <div class="field departure-time">
+            <span class="field-icon">◷</span>
+            <div class="field-content">
+              <label for="departure-time">출발 시각 · 시간표 조회 기준</label>
+              <input id="departure-time" type="datetime-local" aria-label="출발 시각">
+            </div>
+          </div>
+
+          <!-- 경로 탐색 버튼 & 상태 메시지 -->
+          <button id="route-button" class="primary" type="button" disabled>
+            버스 경로 찾기 <span>→</span>
+          </button>
+          <p id="status" class="status" role="status" aria-live="polite">현재 위치 확인부터 시작해 주세요.</p>
+        </section>
+
+        <!-- 이동 경로 지도 미리보기 -->
+        <section class="map-card card" aria-label="경로 지도">
+          <div class="map-header">
+            <div>
+              <span class="eyebrow">ROUTE PREVIEW</span>
+              <h2>이동 경로</h2>
+            </div>
+            <span class="map-legend"><i></i>버스 <i></i>도보</span>
+          </div>
+
+          <div class="map-area">
+            <svg id="map" role="img" aria-label="경로 좌표 미리보기" viewBox="0 0 600 390" preserveAspectRatio="xMidYMid meet">
+              <rect width="600" height="390" fill="#f1f5f1"/>
+              <g class="grid">
+                <path d="M0 70H600M0 150H600M0 230H600M0 310H600M80 0V390M180 0V390M280 0V390M380 0V390M480 0V390M580 0V390"/>
+              </g>
+              <g id="map-paths"></g>
+              <g id="map-markers"></g>
+            </svg>
+            <div id="map-empty" class="map-empty">경로를 찾으면 이동 동선을 보여드려요</div>
+          </div>
+          <p class="map-caption">좌표를 이용한 경로 개요 · 실제 지도 배경은 제공되지 않습니다.</p>
+        </section>
+      </div>
+
+      <!-- 경로 결과 목록 -->
+      <section id="results" class="results" hidden>
+        <div class="section-title">
+          <div>
+            <span class="eyebrow">YOUR ROUTES</span>
+            <h2>추천 버스 경로</h2>
+          </div>
+          <span class="estimate-note">예상 경로 · 실시간 버스 도착 정보 아님</span>
+        </div>
+        <div id="route-list"></div>
+      </section>
+
+      <!-- 내 예약 내역 -->
+      <section id="my-reservations" class="card" hidden>
+        <h2>내 예약 내역</h2>
+        <ul id="my-reservations-list"></ul>
+      </section>
+    </main>
+
+    <footer class="shell">
+      버스길 · TMAP 예상 경로 기반 안내
+    </footer>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+  <script type="module" src="/auth-client.js"></script>
+
+</body>
+</html>
