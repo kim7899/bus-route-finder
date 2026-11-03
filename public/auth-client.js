@@ -12,6 +12,7 @@ async function request(url, data, method = 'POST') {
 function showApp(user) {
   $('auth-screen').hidden = true;
   $('app-screen').hidden = false;
+  $('app-screen').hidden = false;
   $('user-greeting').textContent = `${user.name}님`;
 }
 function showLogin() {

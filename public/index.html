@@ -129,18 +129,16 @@
             <span class="map-legend"><i></i>버스 <i></i>도보</span>
           </div>
 
-          <div class="map-area">
-            <svg id="map" role="img" aria-label="경로 좌표 미리보기" viewBox="0 0 600 390" preserveAspectRatio="xMidYMid meet">
-              <rect width="600" height="390" fill="#f1f5f1"/>
-              <g class="grid">
-                <path d="M0 70H600M0 150H600M0 230H600M0 310H600M80 0V390M180 0V390M280 0V390M380 0V390M480 0V390M580 0V390"/>
-              </g>
-              <g id="map-paths"></g>
-              <g id="map-markers"></g>
-            </svg>
-            <div id="map-empty" class="map-empty">경로를 찾으면 이동 동선을 보여드려요</div>
-          </div>
-          <p class="map-caption">좌표를 이용한 경로 개요 · 실제 지도 배경은 제공되지 않습니다.</p>
+         <div class="map-area">
+  <div id="map" class="real-map"></div>
+  <div id="map-empty" class="map-empty">
+    경로를 찾으면 실제 지도에 표시됩니다.
+  </div>
+</div>
+
+<p class="map-caption">
+  카카오맵 실제 지도 · TMAP 버스 경로
+</p>
         </section>
       </div>
 
@@ -167,7 +165,6 @@
       버스길 · TMAP 예상 경로 기반 안내
     </footer>
   </div>
-
   <script type="module" src="/app.js"></script>
   <script type="module" src="/auth-client.js"></script>
 

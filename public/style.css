@@ -700,3 +700,25 @@ footer {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.real-map {
+  width: 100%;
+  height: 390px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.real-map {
+  width: 100%;
+  height: 390px;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+@media (max-width: 800px) {
+  .real-map {
+    height: 310px;
+  }
+}
+
+.map-empty {
+  pointer-events: none;
+}

@@ -95,7 +95,14 @@ $('route-button').addEventListener('click',async () => {
   status(`${departureInput.value.replace('T',' ')} 출발 기준으로 버스 경로를 비교하고 있어요…`);
   try {
     ({routes} = await api(`/api/routes?${params}`));
-    if (!routes.length) { $('map-empty').hidden = false; $('map-paths').replaceChildren(); $('map-markers').replaceChildren(); return status('이 구간에서 버스 경로를 찾지 못했습니다. 목적지를 바꾸거나 잠시 후 다시 시도해 주세요.',true); }
+   if (!routes.length) {
+  await resetMap();
+
+  return status(
+    '이 구간에서 버스 경로를 찾지 못했습니다.',
+    true
+  );
+}
     renderRoutes(); status(`${routes.length}개의 버스 경로를 찾았어요.`);
   } catch(error) { status(error.message,true); }
   finally { buttonState(); }
@@ -162,23 +169,141 @@ reserve.addEventListener('click', async () => {
   });
   const first=list.querySelector('.route-card'); list.prepend(first); drawMap(routes[0]);
 }
-const ns='http://www.w3.org/2000/svg';
-function svg(tag,attributes,parent) {const node=document.createElementNS(ns,tag);Object.entries(attributes).forEach(([k,v])=>node.setAttribute(k,String(v)));parent.append(node);return node;}
-function drawMap(route) {
-  const paths=$('map-paths'),markers=$('map-markers'); paths.replaceChildren();markers.replaceChildren();$('map-empty').hidden=true;
-  const points=[origin,destination,...route.segments.flatMap(s=>[s.start,s.end,...s.stops.map(x=>x.point),...s.paths.flat()])].filter(Boolean);
-  const minLng=Math.min(...points.map(p=>p.lng)),maxLng=Math.max(...points.map(p=>p.lng));
-  const minLat=Math.min(...points.map(p=>p.lat)),maxLat=Math.max(...points.map(p=>p.lat));
-  const midLat=(minLat+maxLat)/2*Math.PI/180, scaleX=Math.cos(midLat);
-  const width=Math.max((maxLng-minLng)*scaleX,.0001),height=Math.max(maxLat-minLat,.0001);
-  const factor=Math.min(500/width,290/height), offsetX=(600-width*factor)/2,offsetY=(390-height*factor)/2;
-  const xy=p=>({x:offsetX+(p.lng-minLng)*scaleX*factor,y:390-offsetY-(p.lat-minLat)*factor});
-  route.segments.forEach(s=>{
-    const color=s.type==='WALK'?'#e49b45':'#118b61';
-    const lines=s.paths.length?s.paths:(s.start&&s.end?[[s.start,s.end]]:[]);
-    lines.forEach(line=>{if(line.length<2)return;svg('polyline',{points:line.map(p=>{const v=xy(p);return `${v.x},${v.y}`;}).join(' '),fill:'none',stroke:color,'stroke-width':s.type==='WALK'?4:6,'stroke-linecap':'round','stroke-linejoin':'round','stroke-dasharray':s.type==='WALK'?'2 8':'none'},paths);});
-    if(s.type==='BUS') [[s.start,'승차'],[s.end,'하차']].forEach(([p,label])=>{if(p)mark(p,label,'#187d5c');});
+
+
+let kakaoMap = null;
+let mapOverlays = [];
+
+async function initializeKakaoMap() {
+  await kakaoReady;
+
+  const maps = window.kakao.maps;
+  const container = $('map');
+
+  kakaoMap = new maps.Map(container, {
+    center: new maps.LatLng(35.18, 128.11),
+    level: 6
   });
-  mark(origin,'출발','#183e31');mark(destination,'도착','#dc8036');
-  function mark(point,label,color){const p=xy(point);svg('circle',{cx:p.x,cy:p.y,r:8,fill:color,stroke:'#fff','stroke-width':3},markers);const text=svg('text',{x:p.x+11,y:p.y-10,fill:'#24372c','font-size':12,'font-weight':700,stroke:'#fff','stroke-width':3,'paint-order':'stroke'},markers);text.textContent=label;}
+
+  return kakaoMap;
 }
+
+const mapReady = initializeKakaoMap().catch(error => {
+  console.error('카카오맵 초기화 실패:', error);
+  status(error.message, true);
+  return null;
+});
+
+function clearMapOverlays() {
+  for (const overlay of mapOverlays) {
+    overlay.setMap(null);
+  }
+
+  mapOverlays = [];
+}
+
+function toLatLng(point) {
+  if (!point) return null;
+
+  const lat = Number(point.lat);
+  const lng = Number(point.lng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  return new window.kakao.maps.LatLng(lat, lng);
+}
+
+async function drawMap(route) {
+  const map = await mapReady;
+
+  if (!map || !origin || !destination || !route) return;
+
+  const maps = window.kakao.maps;
+  const bounds = new maps.LatLngBounds();
+
+  clearMapOverlays();
+
+  function addMarker(point, title) {
+    const position = toLatLng(point);
+    if (!position) return;
+
+    const marker = new maps.Marker({
+      map,
+      position,
+      title
+    });
+
+    mapOverlays.push(marker);
+    bounds.extend(position);
+  }
+
+  addMarker(origin, '출발지');
+  addMarker(destination, '목적지');
+
+  for (const segment of route.segments ?? []) {
+    const isWalk = segment.type === 'WALK';
+
+    const color = isWalk ? '#e49b45' : '#118b61';
+
+    const lines =
+      Array.isArray(segment.paths) && segment.paths.length
+        ? segment.paths
+        : segment.start && segment.end
+          ? [[segment.start, segment.end]]
+          : [];
+
+    for (const line of lines) {
+      if (!Array.isArray(line)) continue;
+
+      const path = line.map(toLatLng).filter(Boolean);
+
+      if (path.length < 2) continue;
+
+      const polyline = new maps.Polyline({
+        map,
+        path,
+        strokeWeight: isWalk ? 4 : 6,
+        strokeColor: color,
+        strokeOpacity: 0.9,
+        strokeStyle: isWalk ? 'shortdash' : 'solid'
+      });
+
+      mapOverlays.push(polyline);
+
+      for (const position of path) {
+        bounds.extend(position);
+      }
+    }
+
+    if (segment.type === 'BUS') {
+      addMarker(segment.start, '승차 정류장');
+      addMarker(segment.end, '하차 정류장');
+    }
+  }
+
+  map.relayout();
+  map.setBounds(bounds);
+
+  $('map-empty').hidden = true;
+}
+
+async function resetMap() {
+  const map = await mapReady;
+
+  clearMapOverlays();
+
+  if (map) map.relayout();
+
+  $('map-empty').hidden = false;
+}
+
+// 로그인 이후 숨겨져 있던 지도 영역이 표시되면 크기를 다시 계산
+window.addEventListener('bus-app-visible', async () => {
+  const map = await mapReady;
+
+  if (map) {
+    requestAnimationFrame(() => map.relayout());
+  }
+});
