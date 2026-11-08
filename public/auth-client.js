@@ -15,9 +15,14 @@ function showApp(user) {
     return;
   }
 
-  $('auth-screen').hidden = true;
-  $('app-screen').hidden = false;
-  $('user-greeting').textContent = `${user.name}님`;
+  if (user.role === 'PASSENGER') {
+    $('auth-screen').hidden = true;
+    $('app-screen').hidden = false;
+    $('user-greeting').textContent = `${user.name}님`;
+    return;
+  }
+
+  throw new Error('회원 유형을 확인할 수 없습니다.');
 }
 function showLogin() {
   $('auth-screen').hidden = false;

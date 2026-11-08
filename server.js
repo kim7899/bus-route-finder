@@ -148,12 +148,17 @@ export async function handler(req,res) {
   url.pathname === '/api/driver/reservations' &&
   req.method === 'GET'
 ) {
-  if (process.env.NODE_ENV !== 'development') {
-    return fail(res, 403, 'FORBIDDEN', '개발 환경에서만 사용할 수 있습니다.');
-  }
-
   const user = await requireUser(req, res);
-  if (!user) return;
+if (!user) return;
+
+if (user.role !== 'DRIVER') {
+  return fail(
+    res,
+    403,
+    'FORBIDDEN',
+    '버스 기사 계정만 접근할 수 있습니다.'
+  );
+}
 
   const [rows] = await db.execute(`
     SELECT
