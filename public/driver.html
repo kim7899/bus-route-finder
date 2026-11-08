@@ -1,0 +1,85 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>버스 기사 화면</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+
+    .reservation {
+      background: white;
+      padding: 20px;
+      margin: 15px 0;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+    }
+
+    button {
+      padding: 10px 20px;
+      margin-right: 8px;
+      cursor: pointer;
+    }
+
+    .approve { background: #b7e4c7; }
+    .reject { background: #ffccd5; }
+  </style>
+</head>
+<body>
+  <h1>버스 기사 관리 화면</h1>
+<p>예약 목록</p>
+
+<button onclick="loadReservations()">새로고침</button>
+<div id="reservation-list">불러오는 중...</div>
+
+<script>
+  async function loadReservations() {
+    const list = document.getElementById('reservation-list');
+
+    try {
+      const response = await fetch('/api/driver/reservations');
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error?.message || '조회 실패');
+      }
+
+      list.replaceChildren();
+
+      if (data.reservations.length === 0) {
+        list.textContent = '예약이 없습니다.';
+        return;
+      }
+
+      for (const reservation of data.reservations) {
+        const card = document.createElement('div');
+        card.className = 'reservation';
+
+        const title = document.createElement('h3');
+        title.textContent = `예약 #${reservation.id}`;
+
+        const details = document.createElement('p');
+        details.textContent =
+          `승차: ${reservation.boarding_stop || '-'} / ` +
+          `하차: ${reservation.dropoff_stop || '-'} / ` +
+          `상태: ${reservation.status}`;
+
+        card.append(title, details);
+        list.appendChild(card);
+      }
+    } catch (error) {
+      list.textContent = `오류: ${error.message}`;
+    }
+  }
+
+  loadReservations();
+</script>
+</body>
+</html>

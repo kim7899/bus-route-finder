@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {parseRoutes} from './routes.js';
+import { WebSocketServer, WebSocket } from 'ws';
 import {
   authHandler,
   requireUser
@@ -143,6 +144,33 @@ export async function handler(req,res) {
     return authHandler(req, res, url.pathname);
   }
   if (url.pathname.startsWith('/api/')) {
+    if (
+  url.pathname === '/api/driver/reservations' &&
+  req.method === 'GET'
+) {
+  if (process.env.NODE_ENV !== 'development') {
+    return fail(res, 403, 'FORBIDDEN', '개발 환경에서만 사용할 수 있습니다.');
+  }
+
+  const user = await requireUser(req, res);
+  if (!user) return;
+
+  const [rows] = await db.execute(`
+    SELECT
+      id,
+      start_name,
+      end_name,
+      boarding_stop,
+      dropoff_stop,
+      departure_time,
+      status
+    FROM reservations
+    ORDER BY id DESC
+    LIMIT 50
+  `);
+
+  return json(res, 200, { reservations: rows });
+}
     const cancelMatch = url.pathname.match(
   /^\/api\/reservations\/([1-9]\d*)\/cancel$/
 );
@@ -238,12 +266,13 @@ if (cancelMatch) {
       return fail(res,error.status || 502,'UPSTREAM_ERROR',error.message || '외부 API 연결에 실패했습니다.',error.upstreamStatus ? {upstreamStatus:error.upstreamStatus} : {});
     }
   }
-  const files = {
+  const files =  {
   '/': 'index.html',
   '/app.js': 'app.js',
   '/auth-client.js': 'auth-client.js',
   '/destination.js': 'destination.js',
-  '/style.css': 'style.css'
+  '/style.css': 'style.css',
+  '/driver.html': 'driver.html'
 };
   if (req.method !== 'GET' || !files[url.pathname]) return fail(res,404,'NOT_FOUND','페이지를 찾을 수 없습니다.');
   const name = files[url.pathname];
@@ -251,5 +280,40 @@ if (cancelMatch) {
   const content = await readFile(path.join(root,'public',name));
   res.writeHead(200,{'Content-Type':`${mime}; charset=utf-8`,'Cache-Control':'no-store'}); res.end(content);
 }
-if (process.env.NODE_ENV !== 'test') http.createServer((req,res) => { handler(req,res).catch(() => fail(res,500,'SERVER_ERROR','서버 오류가 발생했습니다.')); }).listen(Number(process.env.PORT) || 3000, () => console.log(`http://localhost:${Number(process.env.PORT) || 3000}`));
+if (process.env.NODE_ENV !== 'test') {
+  const server = http.createServer((req, res) => {
+    handler(req, res).catch(error => {
+      console.error('서버 오류:', error);
+      fail(res, 500, 'SERVER_ERROR', '서버 오류가 발생했습니다.');
+    });
+  });
 
+  const wss = new WebSocketServer({
+    server,
+    path: '/ws'
+  });
+
+  wss.on('connection', ws => {
+    console.log('WebSocket 클라이언트 연결');
+
+    ws.send(JSON.stringify({
+      type: 'connected',
+      message: 'WebSocket 연결 성공'
+    }));
+
+    ws.on('message', data => {
+      console.log('WebSocket 메시지 수신:', data.toString());
+    });
+
+    ws.on('close', () => {
+      console.log('WebSocket 클라이언트 연결 종료');
+    });
+  });
+
+  const port = Number(process.env.PORT) || 3000;
+
+  server.listen(port, () => {
+    console.log(`HTTP 서버: http://localhost:${port}`);
+    console.log(`WebSocket 서버: ws://localhost:${port}/ws`);
+  });
+}

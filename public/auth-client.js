@@ -10,8 +10,12 @@ async function request(url, data, method = 'POST') {
   return result;
 }
 function showApp(user) {
+  if (user.role === 'DRIVER') {
+    window.location.replace('/driver.html');
+    return;
+  }
+
   $('auth-screen').hidden = true;
-  $('app-screen').hidden = false;
   $('app-screen').hidden = false;
   $('user-greeting').textContent = `${user.name}님`;
 }
@@ -40,7 +44,8 @@ $('register-form').addEventListener('submit', async event => {
       password: $('register-password').value,
       birthDate: $('register-birth').value,
       email: $('register-email').value,
-      phone: $('register-phone').value
+      phone: $('register-phone').value,
+      role: $('register-role').value
     });
     $('auth-message').textContent = '';
     showApp(result.user);

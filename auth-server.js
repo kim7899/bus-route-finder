@@ -60,7 +60,7 @@ export async function currentUser(req) {
   const token = readCookie(req);
   if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
   const [rows] = await db.execute(
-    `SELECT u.id, u.login_id, u.name FROM user_sessions s
+    `SELECT u.id, u.login_id, u.name, u.role FROM user_sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > NOW() LIMIT 1`,
     [sha256(token)]
@@ -90,6 +90,10 @@ export async function authHandler(req, res, pathname) {
       const loginId = typeof x.loginId === 'string' ? x.loginId.trim() : '';
       const email = typeof x.email === 'string' ? x.email.trim() : '';
       const phone = typeof x.phone === 'string' ? x.phone.trim() : '';
+      const role = x.role ?? 'PASSENGER';
+      if (!['PASSENGER', 'DRIVER'].includes(role)) {
+        return error(res, 400, '올바르지 않은 회원 유형입니다.');
+      }
       if (!name || name.length > 50 || !/^[a-zA-Z0-9_]{4,50}$/.test(loginId) ||
           typeof x.password !== 'string' || x.password.length < 8 || x.password.length > 128 ||
           !validBirth(x.birthDate) || email.length > 255 || phone.length > 20 ||
@@ -97,22 +101,51 @@ export async function authHandler(req, res, pathname) {
         return error(res, 400, '회원가입 정보를 확인해 주세요. 아이디는 영문·숫자·_ 4자 이상, 비밀번호는 8자 이상이어야 합니다.');
       }
       const passwordHash = await hashPassword(x.password);
+
       const [result] = await db.execute(
-        `INSERT INTO users (name, email, phone, login_id, password_hash, birth_date)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [name, email || null, phone || null, loginId, passwordHash, x.birthDate]
+        `INSERT INTO users
+        (name, email, phone, login_id, password_hash, birth_date, role)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          name,
+          email || null,
+          phone || null,
+          loginId,
+          passwordHash,
+          x.birthDate,
+          role
+        ]
       );
+
       await createSession(res, result.insertId);
-      return send(res, 201, { user: { id: result.insertId, login_id: loginId, name } });
+
+      return send(res, 201, {
+        user: {
+          id: result.insertId,
+          login_id: loginId,
+          name,
+          role
+        }
+      });
     }
     if (pathname === '/api/auth/login' && req.method === 'POST') {
       const x = await bodyJson(req);
       if (typeof x.loginId !== 'string' || typeof x.password !== 'string') return error(res, 400, '아이디와 비밀번호를 입력해 주세요.');
-      const [users] = await db.execute('SELECT id, name, login_id, password_hash FROM users WHERE login_id = ? LIMIT 1', [x.loginId]);
+      const [users] = await db.execute(
+        'SELECT id, name, login_id, password_hash, role FROM users WHERE login_id = ? LIMIT 1',
+        [x.loginId]
+      );
       const user = users[0];
       if (!user || !(await verifyPassword(x.password, user.password_hash))) return error(res, 401, '아이디 또는 비밀번호가 올바르지 않습니다.');
       await createSession(res, user.id);
-      return send(res, 200, { user: { id: user.id, name: user.name, login_id: user.login_id } });
+      return send(res, 200, {
+        user: {
+          id: user.id,
+          name: user.name,
+          login_id: user.login_id,
+          role: user.role
+        }
+      });
     }
     if (pathname === '/api/auth/logout' && req.method === 'POST') {
       const token = readCookie(req);
