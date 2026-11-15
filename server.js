@@ -56,6 +56,144 @@ async function readJsonBody(req) {
     throw error;
   }
 }
+
+async function mobileReservations(req, res) {
+  try {
+    // 로그인한 사용자만 접근 가능
+    const user = await requireUser(req, res);
+    if (!user) return;
+
+    if (req.method === 'GET') {
+      const [rows] = await db.execute(
+        `SELECT id, reservation_data
+         FROM mobile_reservations
+         WHERE user_id = ?
+         ORDER BY created_at DESC`,
+        [user.id]
+      );
+
+      const reservations = rows.map(row => {
+        const data = typeof row.reservation_data === 'string'
+          ? JSON.parse(row.reservation_data)
+          : row.reservation_data;
+
+        return { ...data, id: row.id };
+      });
+
+      return json(res, 200, { reservations });
+    }
+
+    if (req.method === 'POST') {
+      const body = await readJsonBody(req);
+      const { id, reservation } = body;
+
+      // Android가 사용하는 UUID 검사
+      const uuidPattern =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      if (typeof id !== 'string' || !uuidPattern.test(id)) {
+        return fail(
+          res, 400, 'INVALID_ID',
+          '예약 ID가 올바르지 않습니다.'
+        );
+      }
+
+      // 예약 삭제: reservation이 null인 경우
+      if (reservation === null) {
+        await db.execute(
+          `DELETE FROM mobile_reservations
+           WHERE id = ? AND user_id = ?`,
+          [id, user.id]
+        );
+
+        return json(res, 200, {
+          success: true,
+          id,
+          deleted: true
+        });
+      }
+
+      // 예약 생성 또는 수정
+      if (
+        !reservation ||
+        typeof reservation !== 'object' ||
+        Array.isArray(reservation) ||
+        reservation.id !== id ||
+        typeof reservation.routeId !== 'string' ||
+        typeof reservation.routeNumber !== 'string' ||
+        typeof reservation.boardingStopId !== 'string' ||
+        typeof reservation.boardingStopName !== 'string' ||
+        typeof reservation.alightingStopId !== 'string' ||
+        typeof reservation.alightingStopName !== 'string' ||
+        typeof reservation.createdAt !== 'number' ||
+        !Number.isFinite(reservation.createdAt)
+      ) {
+        return fail(
+          res, 400, 'INVALID_RESERVATION',
+          '예약 데이터가 올바르지 않습니다.'
+        );
+      }
+
+      const reservationJson = JSON.stringify(reservation);
+
+      if (reservationJson.length > 100000) {
+        return fail(
+          res, 413, 'RESERVATION_TOO_LARGE',
+          '예약 데이터가 너무 큽니다.'
+        );
+      }
+
+      // 같은 예약 ID가 다른 계정에 속하면 덮어쓰지 않음
+      const [existing] = await db.execute(
+        `SELECT user_id
+         FROM mobile_reservations
+         WHERE id = ?`,
+        [id]
+      );
+
+      if (
+        existing.length > 0 &&
+        String(existing[0].user_id) !== String(user.id)
+      ) {
+        return fail(
+          res, 409, 'RESERVATION_CONFLICT',
+          '다른 계정의 예약 ID와 충돌했습니다.'
+        );
+      }
+
+      await db.execute(
+        `INSERT INTO mobile_reservations
+           (id, user_id, reservation_data)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           reservation_data = VALUES(reservation_data),
+           updated_at = CURRENT_TIMESTAMP`,
+        [id, user.id, reservationJson]
+      );
+
+      return json(res, 200, {
+        success: true,
+        id
+      });
+    }
+
+    return fail(
+      res, 405, 'METHOD_NOT_ALLOWED',
+      'GET 또는 POST만 지원합니다.'
+    );
+
+  } catch (error) {
+    console.error('Android 예약 동기화 오류:', error);
+
+    return fail(
+      res,
+      error.status || 500,
+      'MOBILE_RESERVATION_ERROR',
+      error.status ? error.message : '예약 동기화 중 서버 오류가 발생했습니다.'
+    );
+  }
+}
+
 async function createReservation(req, res) {
   try {
     const body = await readJsonBody(req);
@@ -143,6 +281,9 @@ export async function handler(req,res) {
   if (url.pathname.startsWith('/api/auth/')) {
     return authHandler(req, res, url.pathname);
   }
+  if (url.pathname === '/api/mobile/reservations') {
+  return mobileReservations(req, res);
+}
   if (url.pathname.startsWith('/api/')) {
     if (
   url.pathname === '/api/driver/reservations' &&
@@ -223,7 +364,9 @@ if (cancelMatch) {
      const user = await requireUser(req, res);
   if (!user) return;
 
+  
   if (req.method === 'POST') {
+    
     return createReservation(req, res);
   }
 
