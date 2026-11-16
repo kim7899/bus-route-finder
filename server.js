@@ -5,6 +5,9 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {parseRoutes} from './routes.js';
 import { WebSocketServer, WebSocket } from 'ws';
+import { createLiveDriverHandler } from './live-driver-service.js';
+import { createJinjuProvider } from './jinju-provider.js';
+import { createDriverReservationDbAdapter } from './driver-db-compat.js';
 import {
   authHandler,
   requireUser
@@ -12,6 +15,10 @@ import {
 const root = path.dirname(fileURLToPath(import.meta.url));
 try { const env = await readFile(path.join(root, '.env'), 'utf8'); for (const line of env.split(/\r?\n/)) { const match = line.match(/^([A-Z_]+)=(.*)$/); if (match && !process.env[match[1]]) process.env[match[1]] = match[2].trim().replace(/^['"]|['"]$/g, ''); } } catch (error) { if (error.code !== 'ENOENT') throw error; }
 const key = process.env.TMAP_API_KEY;
+const liveDriverHandler = createLiveDriverHandler({
+  db: createDriverReservationDbAdapter(db),
+  provider: createJinjuProvider()
+});
 const json = (res, status, body) => { res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(JSON.stringify(body)); };
 const fail = (res,status,code,message,details={}) => json(res,status,{error:{code,message,...details}});
 const validLat = v => v !== null && v !== '' && Number.isFinite(Number(v)) && Math.abs(Number(v)) <= 90;
@@ -276,8 +283,19 @@ const userId = user.id;
     );
   }
 }
-export async function handler(req,res) {
+export async function handler(req, res) {
   const url = new URL(req.url, 'http://localhost');
+
+  // 버스기사 앱 전용 API
+  if ([
+    '/api/driver/routes',
+    '/api/driver/vehicles',
+    '/api/driver/route-snapshot'
+  ].includes(url.pathname)) {
+    return liveDriverHandler(req, res);
+  }
+
+  // 기존 로그인 API
   if (url.pathname.startsWith('/api/auth/')) {
     return authHandler(req, res, url.pathname);
   }
