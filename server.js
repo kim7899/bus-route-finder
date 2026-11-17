@@ -21,6 +21,90 @@ const liveDriverHandler = createLiveDriverHandler({
 });
 const json = (res, status, body) => { res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(JSON.stringify(body)); };
 const fail = (res,status,code,message,details={}) => json(res,status,{error:{code,message,...details}});
+ // 차량별 최신 GPS 위치 저장
+const driverLocations = new Map();
+
+// GPS 위치 수신 및 조회
+
+async function driverLocation(req, res, url) {
+  // 개발용 GPS 인증 우회
+  const gpsDevMode =
+    process.env.GPS_DEV_MODE === 'true' &&
+    process.env.NODE_ENV !== 'production';
+
+  if (!gpsDevMode) {
+    const user = await requireUser(req, res);
+    if (!user) return;
+
+    if (user.role !== 'DRIVER') {
+      return fail(res, 403, 'FORBIDDEN', '기사 계정만 접근할 수 있습니다.');
+    }
+  }
+
+  // 아래 기존 POST / GET 처리 코드는 그대로 유지
+  if (req.method === 'POST') {
+    let body;
+
+    try {
+      body = await readJsonBody(req);
+    } catch (error) {
+      return fail(res, error.status || 400, 'INVALID_JSON', error.message);
+    }
+
+    const { routeId, vehicleId, latitude, longitude, accuracy } = body;
+
+    if (
+      typeof routeId !== 'string' || !routeId.trim() ||
+      typeof vehicleId !== 'string' || !vehicleId.trim() ||
+      routeId.length > 128 || vehicleId.length > 128 ||
+      typeof latitude !== 'number' ||
+      typeof longitude !== 'number' ||
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      Math.abs(latitude) > 90 ||
+      Math.abs(longitude) > 180 ||
+      typeof accuracy !== 'number' ||
+      !Number.isFinite(accuracy) ||
+      accuracy < 0 || accuracy > 100
+    ) {
+      return fail(res, 400, 'INVALID_LOCATION', 'GPS 데이터가 올바르지 않습니다.');
+    }
+
+    const location = {
+      routeId,
+      vehicleId,
+      latitude,
+      longitude,
+      accuracy,
+      updatedAt: Date.now()
+    };
+
+    driverLocations.set(vehicleId, location);
+
+    return json(res, 200, {
+      success: true,
+      location
+    });
+  }
+
+  if (req.method === 'GET') {
+    const vehicleId = url.searchParams.get('vehicleId');
+
+    if (!vehicleId) {
+      return fail(res, 400, 'MISSING_VEHICLE', '차량 ID가 필요합니다.');
+    }
+
+    const location = driverLocations.get(vehicleId);
+
+    if (!location || Date.now() - location.updatedAt > 30000) {
+      return fail(res, 404, 'LOCATION_NOT_FOUND', '최신 위치 정보가 없습니다.');
+    }
+
+    return json(res, 200, { location });
+  }
+
+  return fail(res, 405, 'METHOD_NOT_ALLOWED', 'GET 또는 POST만 지원합니다.');
+}
 const validLat = v => v !== null && v !== '' && Number.isFinite(Number(v)) && Math.abs(Number(v)) <= 90;
 const validLng = v => v !== null && v !== '' && Number.isFinite(Number(v)) && Math.abs(Number(v)) <= 180;
 const validSearchDttm = value => {
@@ -285,6 +369,9 @@ const userId = user.id;
 }
 export async function handler(req, res) {
   const url = new URL(req.url, 'http://localhost');
+    if (url.pathname === '/api/driver/location') {
+    return driverLocation(req, res, url);
+  }
 
   // 버스기사 앱 전용 API
   if ([
