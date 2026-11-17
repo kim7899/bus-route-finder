@@ -80,6 +80,18 @@ async function driverLocation(req, res, url) {
     };
 
     driverLocations.set(vehicleId, location);
+    await db.execute(
+  `INSERT INTO driver_locations
+     (vehicle_id, route_id, latitude, longitude, accuracy, recorded_at)
+   VALUES (?, ?, ?, ?, ?, NOW(3))
+   ON DUPLICATE KEY UPDATE
+     route_id = VALUES(route_id),
+     latitude = VALUES(latitude),
+     longitude = VALUES(longitude),
+     accuracy = VALUES(accuracy),
+     recorded_at = NOW(3)`,
+  [vehicleId, routeId, latitude, longitude, accuracy]
+);
 
     return json(res, 200, {
       success: true,
